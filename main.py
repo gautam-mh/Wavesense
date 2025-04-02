@@ -3,13 +3,12 @@ from tkinter import ttk, messagebox
 import threading
 import logging
 from mouse_controller import MouseController
-from serial_handler import SerialHandler
 from gesture_handler import GestureHandler
 
 class AirMouseGUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Air Mouse Controller")
+        self.root.title("Air Mouse Controller (WiFi)")
         self.root.geometry("400x400")
 
         self.controller = MouseController()
@@ -25,12 +24,10 @@ class AirMouseGUI:
         frame = ttk.Frame(self.root, padding="10")
         frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        # Port selection
-        ttk.Label(frame, text="Select Port:").grid(row=0, column=0, padx=5, pady=5)
-        self.port_var = tk.StringVar()
-        self.port_combo = ttk.Combobox(frame, textvariable=self.port_var)
-        self.refresh_ports()
-        self.port_combo.grid(row=0, column=1, padx=5, pady=5)
+        # IP Address input
+        ttk.Label(frame, text="ESP32 IP Address:").grid(row=0, column=0, padx=5, pady=5)
+        self.ip_var = tk.StringVar(value="192.168.4.1")  # Default IP
+        ttk.Entry(frame, textvariable=self.ip_var, width=15).grid(row=0, column=1, padx=5, pady=5)
 
         # Sensitivity control
         ttk.Label(frame, text="Sensitivity:").grid(row=1, column=0, padx=5, pady=5)
@@ -63,6 +60,14 @@ class AirMouseGUI:
         )
         self.calibrate_button.grid(row=3, column=0, padx=5, pady=5)
         self.calibrate_button['state'] = 'disabled'
+
+        self.calibrate_tilt_button = ttk.Button(
+            frame,
+            text="Calibrate Tilt",
+            command=self.calibrate_tilt
+        )
+        self.calibrate_tilt_button.grid(row=3, column=2, padx=5, pady=5)
+        self.calibrate_tilt_button['state'] = 'disabled'
 
         # Connect button
         self.connect_button = ttk.Button(
@@ -116,22 +121,16 @@ class AirMouseGUI:
             command=self.set_gesture_mode
         ).pack(side=tk.LEFT, padx=5)
 
-    def refresh_ports(self):
-        ports = SerialHandler.list_ports()
-        self.port_combo['values'] = ports
-        if ports and not self.port_var.get():
-            self.port_combo.set(ports[0])
-
     def set_cursor_mode(self):
         """Switch to cursor control mode"""
-        if self.controller.serial_handler.is_connected():
-            self.controller.serial_handler.write(b"CURSOR_MODE\n")
+        if self.controller.wifi_handler.is_connected():
+            self.controller.wifi_handler.write(b"CURSOR_MODE\n")
             self.status_var.set("Cursor Mode Active")
 
     def set_gesture_mode(self):
         """Switch to gesture control mode"""
-        if self.controller.serial_handler.is_connected():
-            self.controller.serial_handler.write(b"GESTURE_MODE\n")
+        if self.controller.wifi_handler.is_connected():
+            self.controller.wifi_handler.write(b"GESTURE_MODE\n")
             self.status_var.set("Gesture Mode Active")
 
     def update_calibration_progress(self, progress):
@@ -159,6 +158,14 @@ class AirMouseGUI:
 
         threading.Thread(target=calibrate_thread, daemon=True).start()
 
+    def calibrate_tilt(self):
+        if not self.controller.wifi_handler.is_connected():
+            self.status_var.set("Not connected to device")
+            return
+
+        self.status_var.set("Starting tilt calibration...")
+        self.controller.wifi_handler.write(b"CALIBRATE_TILT\n")
+
     def toggle_connection(self):
         if self.connect_button['text'] == "Connect":
             self.start_controller()
@@ -166,18 +173,17 @@ class AirMouseGUI:
             self.stop_controller()
 
     def start_controller(self):
-        if not self.port_var.get():
-            self.status_var.set("Please select a port!")
+        ip_address = self.ip_var.get()
+        if not ip_address:
+            self.status_var.set("Please enter an IP address!")
             return
 
-        if self.controller.connect(self.port_var.get()):
+        self.status_var.set(f"Connecting to {ip_address}...")
+        if self.controller.connect(ip_address):
             self.connect_button['text'] = "Disconnect"
-            self.status_var.set("Connected")
-            self.port_combo['state'] = 'disabled'
+            self.status_var.set(f"Connected to {ip_address}")
             self.calibrate_button['state'] = 'normal'
-
-            # Start controller in separate thread
-            threading.Thread(target=self.controller.start, daemon=True).start()
+            self.calibrate_tilt_button['state'] = 'normal'  # Enable tilt calibration
 
             # Start settings update loop
             self.update_settings()
@@ -185,19 +191,23 @@ class AirMouseGUI:
             self.status_var.set("Connection failed!")
 
     def stop_controller(self):
-        self.controller.stop()
         self.controller.disconnect()
         self.connect_button['text'] = "Connect"
         self.status_var.set("Disconnected")
-        self.port_combo['state'] = 'normal'
         self.calibrate_button['state'] = 'disabled'
+        self.calibrate_tilt_button['state'] = 'disabled'  # Disable tilt calibration
 
     def update_settings(self):
         """Update controller settings from GUI controls"""
-        if self.controller.is_running:
-            self.controller.sensitivity = self.sensitivity_scale.get()
-            self.controller.smoothing = self.smoothing_scale.get()
+        if self.controller.wifi_handler.is_connected():
+            self.controller.set_cursor_speed(self.sensitivity_scale.get())
+            self.controller.set_smoothing_factor(self.smoothing_scale.get())
             self.root.after(100, self.update_settings)
+    
+    def log(self, message):
+        """Log a message and update status"""
+        self.logger.info(message)
+        self.status_var.set(message)
 
     def run(self):
         self.root.mainloop()

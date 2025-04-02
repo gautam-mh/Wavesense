@@ -1,13 +1,13 @@
 import pyautogui
 import logging
 import time
-from serial_handler import SerialHandler
+from wifi_handler import WiFiHandler
 from gesture_handler import GestureHandler
 
 class MouseController:
     def __init__(self):
         self.logger = logging.getLogger('AirMouse.Controller')
-        self.serial_handler = SerialHandler()
+        self.wifi_handler = WiFiHandler()
         self.gesture_handler = GestureHandler()
         self.is_running = False
         self.is_calibrating = False
@@ -19,42 +19,41 @@ class MouseController:
         self.prev_x = 0
         self.prev_y = 0
 
+        # Screen boundaries
+        self.screen_width, self.screen_height = pyautogui.size()
+
         # Calibration callback
         self.calibration_callback = lambda x: None
+
+        # Tilt calibration
+        self.tilt_calibrating = False
 
         # Configure PyAutoGUI
         pyautogui.FAILSAFE = False
         pyautogui.PAUSE = 0.001
 
-        # Initialize state
-        self.initialized = False
-
-    def connect(self, port):
-        """Connect to ESP32"""
+    def connect(self, ip_address, port=80):
+        """Connect to ESP32 via WiFi"""
         try:
-            success = self.serial_handler.connect(port)
+            success = self.wifi_handler.connect(ip_address, port)
             if success:
-                # Clear any initial data
-                self.serial_handler.clear_buffer()
+                # Set data callback
+                self.wifi_handler.set_data_callback(self.process_data)
 
                 # Send init check command
-                self.serial_handler.write(b"INIT_CHECK\n")
+                self.wifi_handler.write(b"INIT_CHECK\n")
 
                 # Wait for initialization response
                 timeout = time.time() + 5
-                while time.time() < timeout:
-                    data = self.serial_handler.read_line()
-                    if data:
-                        self.logger.info(f"Init data: {data}")
-                        if "INIT_COMPLETE" in data:
-                            self.initialized = True
-                            self.logger.info("Device initialized successfully")
-                            return True
+                while time.time() < timeout and not self.initialized:
                     time.sleep(0.1)
 
-                self.logger.error("Device initialization timeout")
-                self.serial_handler.disconnect()
-                return False
+                if not self.initialized:
+                    self.logger.error("Device initialization timeout")
+                    self.wifi_handler.disconnect()
+                    return False
+
+                return True
             return False
         except Exception as e:
             self.logger.error(f"Connection error: {e}")
@@ -63,7 +62,7 @@ class MouseController:
     def disconnect(self):
         """Disconnect from ESP32"""
         self.initialized = False
-        return self.serial_handler.disconnect()
+        return self.wifi_handler.disconnect()
 
     def set_calibration_callback(self, callback):
         """Set the callback for calibration progress updates"""
@@ -79,38 +78,13 @@ class MouseController:
             self.is_calibrating = True
             self.logger.info("Starting calibration...")
 
-            # Clear any pending data
-            self.serial_handler.clear_buffer()
-
             # Send calibration command
-            self.serial_handler.serial.write(b"CALIBRATE\n")
+            self.wifi_handler.write(b"CALIBRATE\n")
 
-            # Wait for calibration process
-            calibration_timeout = time.time() + 5  # 5 seconds timeout
+            # Wait for calibration process (handled by process_data)
+            calibration_timeout = time.time() + 10  # 10 seconds timeout
             while self.is_calibrating and time.time() < calibration_timeout:
-                data = self.serial_handler.read_line()
-                if data:
-                    self.logger.debug(f"Calibration data: {data}")
-
-                    if "CALIBRATION_START" in data:
-                        self.logger.info("Calibration in progress...")
-                    elif "CALIBRATION_PROGRESS" in data:
-                        try:
-                            progress = int(data.split(',')[1])
-                            self.calibration_callback(progress)
-                        except:
-                            self.logger.error(f"Invalid progress data: {data}")
-                    elif "CALIBRATION_COMPLETE" in data:
-                        self.logger.info("Calibration completed")
-                        self.is_calibrating = False
-                        self.calibration_callback(100)
-                        return True
-                    elif "CALIBRATION_FAILED" in data:
-                        self.logger.error("Calibration failed")
-                        self.is_calibrating = False
-                        return False
-
-                time.sleep(0.01)
+                time.sleep(0.1)
 
             if time.time() >= calibration_timeout:
                 self.logger.error("Calibration timeout")
@@ -123,42 +97,90 @@ class MouseController:
             self.is_calibrating = False
             return False
 
-    def move_cursor(self, vx, vy):
-        """Move the cursor based on gyroscope data"""
+    def calibrate_tilt(self):
+        """Calibrate the tilt sensor"""
         try:
-            # Apply smoothing
-            vx = vx * (1 - self.smoothing) + self.prev_x * self.smoothing
-            vy = vy * (1 - self.smoothing) + self.prev_y * self.smoothing
+            if not self.initialized:
+                self.logger.error("Device not initialized")
+                return False
 
-            # Store values for next smoothing
-            self.prev_x = vx
-            self.prev_y = vy
+            self.tilt_calibrating = True
+            self.logger.info("Starting tilt calibration...")
 
-            # Apply movement threshold
-            if abs(vx) < 0.05 and abs(vy) < 0.05:  # Reduced threshold for more sensitivity
-                return
+            # Send tilt calibration command
+            self.wifi_handler.write(b"CALIBRATE_TILT\n")
 
-            # Scale by sensitivity
-            vx *= self.sensitivity
-            vy *= self.sensitivity
+            # Wait for calibration process (handled by process_data)
+            calibration_timeout = time.time() + 10  # 10 seconds timeout
+            while self.tilt_calibrating and time.time() < calibration_timeout:
+                time.sleep(0.1)
 
-            # Get current position
-            current_x, current_y = pyautogui.position()
+            if time.time() >= calibration_timeout:
+                self.logger.error("Tilt calibration timeout")
+                self.tilt_calibrating = False
+                return False
 
-            # Calculate new position
-            new_x = current_x + vx
-            new_y = current_y + vy
-
-            # Move cursor
-            pyautogui.moveTo(new_x, new_y)
-
+            return True
         except Exception as e:
-            self.logger.error(f"Error moving cursor: {e}")
-    
+            self.logger.error(f"Tilt calibration error: {e}")
+            self.tilt_calibrating = False
+            return False
+
     def process_data(self, data):
         """Process incoming data from ESP32"""
         try:
-            if self.is_calibrating or not self.initialized:
+            # Debug output to help troubleshoot
+            self.logger.debug(f"Received data: {data}")
+
+            # Handle initialization
+            if data == "INIT_COMPLETE":
+                self.initialized = True
+                self.logger.info("Device initialized successfully")
+                return
+
+            # Handle calibration data
+            if "CALIBRATION_START" in data:
+                self.logger.info("Calibration in progress...")
+                if self.calibration_callback:
+                    self.calibration_callback(0)
+                return
+
+            if "TILT_CALIBRATION_START" in data:
+                self.logger.info("Tilt calibration in progress...")
+                self.tilt_calibrating = True
+                if self.calibration_callback:
+                    self.calibration_callback(0)
+                return
+
+            if "CALIBRATION_PROGRESS" in data:
+                try:
+                    progress = int(data.split(',')[1])
+                    if self.calibration_callback:
+                        self.calibration_callback(progress)
+                except:
+                    self.logger.error(f"Invalid progress data: {data}")
+                return
+
+            if "CALIBRATION_COMPLETE" in data:
+                self.logger.info("Calibration completed")
+                self.is_calibrating = False
+                if self.calibration_callback:
+                    self.calibration_callback(100)
+                return
+
+            if "TILT_CALIBRATION_COMPLETE" in data:
+                self.logger.info("Tilt calibration completed")
+                self.tilt_calibrating = False
+                if self.calibration_callback:
+                    self.calibration_callback(100)
+                return
+
+            if "CALIBRATION_FAILED" in data:
+                self.logger.error("Calibration failed")
+                self.is_calibrating = False
+                self.tilt_calibrating = False
+                if self.calibration_callback:
+                    self.calibration_callback(-1)  # Negative value indicates failure
                 return
 
             # Handle mode change confirmations
@@ -177,42 +199,98 @@ class MouseController:
                 self.gesture_handler.process_gesture(gesture)
                 return
 
-            # Keep existing cursor control code
+            # Handle cursor data
             if data.startswith("CURSOR,"):
                 parts = data.split(',')
-                if len(parts) == 3:
+                if len(parts) >= 3:  # Changed from == 3 to >= 3 for more flexibility
                     try:
                         vx = float(parts[1])
                         vy = float(parts[2])
                         self.move_cursor(vx, vy)
                     except ValueError:
-                        self.logger.error("Invalid cursor data format")
+                        self.logger.error(f"Invalid cursor data format: {data}")
                 return
 
-            # Keep other existing data handling code
+            # Handle cursor centered command
+            if data == "CURSOR_CENTERED":
+                self.center_cursor()
+                return
 
         except Exception as e:
             self.logger.error(f"Data processing error: {e}")
 
-    def start(self):
-        """Start processing mouse data"""
+    def move_cursor(self, vx, vy):
+        """Move the cursor based on tilt angles"""
+        try:
+            # Apply smoothing
+            vx = vx * (1 - self.smoothing) + self.prev_x * self.smoothing
+            vy = vy * (1 - self.smoothing) + self.prev_y * self.smoothing
+
+            # Store values for next smoothing
+            self.prev_x = vx
+            self.prev_y = vy
+
+            # Apply movement threshold - lower threshold for tilt control
+            if abs(vx) < 0.05 and abs(vy) < 0.05:
+                return
+
+            # Scale by sensitivity
+            vx *= self.sensitivity
+            vy *= self.sensitivity
+
+            # Get current position
+            current_x, current_y = pyautogui.position()
+
+            # Calculate new position
+            new_x = current_x + vx
+            new_y = current_y + vy
+
+            # Ensure cursor stays within screen bounds
+            new_x = max(0, min(new_x, self.screen_width - 1))
+            new_y = max(0, min(new_y, self.screen_height - 1))
+
+            # Move cursor
+            pyautogui.moveTo(new_x, new_y)
+
+        except Exception as e:
+            self.logger.error(f"Error moving cursor: {e}")
+
+    def center_cursor(self):
+        """Center the cursor on the screen"""
+        try:
+            pyautogui.moveTo(self.screen_width // 2, self.screen_height // 2)
+            self.logger.info("Cursor centered")
+        except Exception as e:
+            self.logger.error(f"Error centering cursor: {e}")
+
+    def set_initialized(self, value):
+        """Set the initialized state"""
+        self.initialized = value
+
+    def set_cursor_speed(self, speed):
+        """Set the cursor speed"""
+        self.sensitivity = speed
+        self.logger.info(f"Cursor speed set to: {speed}")
+
+    def set_smoothing_factor(self, factor):
+        """Set the smoothing factor"""
+        self.smoothing = max(0.0, min(0.95, factor))  # Clamp between 0 and 0.95
+        self.logger.info(f"Smoothing factor set to: {factor}")
+
+    def set_cursor_mode(self):
+        """Switch to cursor mode"""
         if not self.initialized:
-            self.logger.error("Cannot start: Device not initialized")
-            return
+            self.logger.error("Device not initialized")
+            return False
 
-        self.is_running = True
-        self.logger.info("Starting mouse control")
+        self.wifi_handler.write(b"CURSOR_MODE\n")
+        return True
 
-        while self.is_running:
-            try:
-                data = self.serial_handler.read_line()
-                if data:
-                    self.process_data(data)
-            except Exception as e:
-                self.logger.error(f"Read error: {e}")
-            time.sleep(0.01)
+    def set_gesture_mode(self):
+        """Switch to gesture mode"""
+        if not self.initialized:
+            self.logger.error("Device not initialized")
+            return False
 
-    def stop(self):
-        """Stop processing mouse data"""
-        self.is_running = False
-        self.logger.info("Stopping mouse control")
+        self.wifi_handler.write(b"GESTURE_MODE\n")
+        return True
