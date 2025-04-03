@@ -44,7 +44,7 @@ const float MAX_SPEED = 15.0;          // Maximum cursor speed
 const float DEADZONE = 2.0;            // Deadzone to prevent drift
 const float SMOOTHING_FACTOR = 0.8;    // Higher = more smoothing (0.0-1.0)
 
-// Gesture thresholds (from Arduino example)
+// Gesture thresholds
 const int THRESHOLD_LOW = 80;
 const int THRESHOLD_HIGH = 145;
 const int NEUTRAL_LOW = 100;
@@ -66,6 +66,13 @@ const int SCL_PIN = 22;
 // Last gesture tracking
 unsigned long lastGestureTime = 0;
 const unsigned long GESTURE_COOLDOWN = 500;
+
+// Function prototypes - required for .cpp files
+void calibrateSensor();
+void calibrateTilt();
+void handleGestureMode();
+void sendMotionData();
+float sign(float value);
 
 // Helper function for sign
 float sign(float value) {
@@ -182,7 +189,7 @@ void handleGestureMode() {
     // Get motion data
     mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
     
-    // Map acceleration values exactly like the Arduino example
+    // Map acceleration values
     byte mappedX = map(ax, -17000, 17000, 0, 255);
     byte mappedY = map(ay, -17000, 17000, 0, 255);
     
@@ -200,7 +207,7 @@ void handleGestureMode() {
         return;
     }
     
-    // Check for gestures using the same logic as the Arduino example
+    // Check for gestures
     if (mappedY < THRESHOLD_LOW) {
         if (clientConnected) client.println("GESTURE,DOWN");  // gesture 1
         lastGestureTime = currentTime;
