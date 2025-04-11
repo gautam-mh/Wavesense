@@ -1,137 +1,385 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
-import threading
+from tkinter import ttk
 import logging
+import os
+from wifi_handler import WiFiHandler
 from mouse_controller import MouseController
 from gesture_handler import GestureHandler
+import threading
+import time
+from tkinter import simpledialog
 
 class AirMouseGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Air Mouse Controller (WiFi)")
-        self.root.geometry("400x400")
+        self.root.geometry("500x600")
 
-        self.controller = MouseController()
+        # Setup logging
         self.setup_logging()
-        self.controller.set_calibration_callback(self.update_calibration_progress)
+
+        # Initialize components
+        self.wifi_handler = WiFiHandler()
+        self.mouse_controller = MouseController()
+        self.gesture_handler = GestureHandler()
+
+        # Set callbacks
+        self.wifi_handler.set_data_callback(self.mouse_controller.process_data)
+        self.gesture_handler.set_callback(self.handle_recognized_gesture)
+
+        # Set gesture callback in mouse controller
+        self.mouse_controller.set_gesture_callback(self.gesture_handler.process_data)
+
+        # Create GUI
         self.create_widgets()
 
+        # Center window
+        self.center_window()
+
     def setup_logging(self):
-        logging.basicConfig(level=logging.INFO)
+        """Setup logging configuration"""
+        log_dir = "logs"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(os.path.join(log_dir, "air_mouse.log")),
+                logging.StreamHandler()
+            ]
+        )
+
         self.logger = logging.getLogger('AirMouse.GUI')
 
     def create_widgets(self):
-        frame = ttk.Frame(self.root, padding="10")
-        frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        """Create GUI widgets"""
+        # Main frame
+        main_frame = ttk.Frame(self.root, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # IP Address input
-        ttk.Label(frame, text="ESP32 IP Address:").grid(row=0, column=0, padx=5, pady=5)
-        self.ip_var = tk.StringVar(value="192.168.4.1")  # Default IP
-        ttk.Entry(frame, textvariable=self.ip_var, width=15).grid(row=0, column=1, padx=5, pady=5)
+        # Connection frame
+        connection_frame = self.create_connection_frame(main_frame)
+        connection_frame.pack(fill=tk.X, pady=10)
 
-        # Sensitivity control
-        ttk.Label(frame, text="Sensitivity:").grid(row=1, column=0, padx=5, pady=5)
-        self.sensitivity_scale = ttk.Scale(frame, from_=0.1, to=2.0, orient='horizontal')
-        self.sensitivity_scale.set(1.0)
-        self.sensitivity_scale.grid(row=1, column=1, padx=5, pady=5, sticky='ew')
-
-        # Smoothing control
-        ttk.Label(frame, text="Smoothing:").grid(row=2, column=0, padx=5, pady=5)
-        self.smoothing_scale = ttk.Scale(frame, from_=0, to=0.9, orient='horizontal')
-        self.smoothing_scale.set(0.5)
-        self.smoothing_scale.grid(row=2, column=1, padx=5, pady=5, sticky='ew')
-
-        # Progress bar for calibration
-        self.progress_var = tk.IntVar()
-        self.progress_bar = ttk.Progressbar(
-            frame,
-            orient='horizontal',
-            length=200,
-            mode='determinate',
-            variable=self.progress_var
-        )
-        self.progress_bar.grid(row=3, column=1, padx=5, pady=5, sticky='ew')
-
-        # Calibration button
-        self.calibrate_button = ttk.Button(
-            frame,
-            text="Calibrate",
-            command=self.calibrate_sensor
-        )
-        self.calibrate_button.grid(row=3, column=0, padx=5, pady=5)
-        self.calibrate_button['state'] = 'disabled'
-
-        self.calibrate_tilt_button = ttk.Button(
-            frame,
-            text="Calibrate Tilt",
-            command=self.calibrate_tilt
-        )
-        self.calibrate_tilt_button.grid(row=3, column=2, padx=5, pady=5)
-        self.calibrate_tilt_button['state'] = 'disabled'
-
-        # Connect button
-        self.connect_button = ttk.Button(
-            frame,
-            text="Connect",
-            command=self.toggle_connection
-        )
-        self.connect_button.grid(row=4, column=0, columnspan=2, pady=10)
-
-        # Status label
-        self.status_var = tk.StringVar(value="Ready")
-        ttk.Label(
-            frame,
-            textvariable=self.status_var
-        ).grid(row=5, column=0, columnspan=2)
-
-        # Calibration instructions
-        instruction_text = (
-            "Calibration Instructions:\n"
-            "1. Place the sensor on a flat surface\n"
-            "2. Keep it completely still\n"
-            "3. Click Calibrate and wait for 1 second\n"
-            "4. Progress bar will show calibration status\n"
-            "5. Done when progress reaches 100%"
-        )
-        ttk.Label(
-            frame,
-            text=instruction_text,
-            justify=tk.LEFT
-        ).grid(row=6, column=0, columnspan=2, pady=10)
-
-        # Calibration time label
-        self.calibration_time = ttk.Label(
-            frame,
-            text="Calibration time: 1 second"
-        )
-        self.calibration_time.grid(row=7, column=0, columnspan=2, pady=5)
-
-        mode_frame = ttk.LabelFrame(frame, text="Control Mode", padding="5")
-        mode_frame.grid(row=8, column=0, columnspan=2, pady=10, sticky='ew')
+        # Mode buttons
+        mode_frame = ttk.LabelFrame(main_frame, text="Operation Mode", padding=10)
+        mode_frame.pack(fill=tk.X, pady=10)
 
         ttk.Button(
             mode_frame,
             text="Cursor Mode",
             command=self.set_cursor_mode
-        ).pack(side=tk.LEFT, padx=5)
+        ).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
 
         ttk.Button(
             mode_frame,
             text="Gesture Mode",
             command=self.set_gesture_mode
-        ).pack(side=tk.LEFT, padx=5)
+        ).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
+
+        ttk.Button(
+            mode_frame,
+            text="Idle Mode",
+            command=self.set_idle_mode
+        ).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
+
+        # Cursor settings
+        cursor_frame = self.create_cursor_settings_frame(main_frame)
+        cursor_frame.pack(fill=tk.X, pady=10)
+
+        # Gesture frame
+        gesture_frame = self.create_gesture_frame(main_frame)
+        gesture_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        # Log frame
+        log_frame = ttk.LabelFrame(main_frame, text="Log", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        self.log_text = tk.Text(log_frame, height=10, width=50)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+
+        # Add a custom handler to redirect logs to the text widget
+        text_handler = TextHandler(self.log_text)
+        text_handler.setLevel(logging.INFO)
+        logging.getLogger().addHandler(text_handler)
+    
+    def create_connection_frame(self, parent):
+        """Create the connection frame"""
+        frame = ttk.LabelFrame(parent, text="Connection", padding=10)
+
+        ttk.Label(frame, text="ESP32 IP:").grid(row=0, column=0, padx=5, pady=5)
+
+        self.ip_var = tk.StringVar(value="192.168.4.1")
+        ttk.Entry(frame, textvariable=self.ip_var, width=15).grid(row=0, column=1, padx=5, pady=5)
+
+        self.connect_button = ttk.Button(
+            frame,
+            text="Connect",
+            command=self.toggle_connection
+        )
+        self.connect_button.grid(row=0, column=2, padx=5, pady=5)
+
+        self.status_var = tk.StringVar(value="Disconnected")
+        ttk.Label(frame, textvariable=self.status_var).grid(row=0, column=3, padx=5, pady=5)
+
+        return frame
+
+    def create_cursor_settings_frame(self, parent):
+        """Create the cursor settings frame"""
+        frame = ttk.LabelFrame(parent, text="Cursor Settings", padding=10)
+
+        # Speed slider
+        ttk.Label(frame, text="Speed:").grid(row=0, column=0, padx=5, pady=5)
+        self.speed_var = tk.DoubleVar(value=5.0)
+        speed_slider = ttk.Scale(
+            frame,
+            from_=1.0,
+            to=10.0,
+            variable=self.speed_var,
+            orient=tk.HORIZONTAL,
+            length=200,
+            command=self.update_cursor_speed
+        )
+        speed_slider.grid(row=0, column=1, padx=5, pady=5)
+        ttk.Label(frame, textvariable=self.speed_var).grid(row=0, column=2, padx=5, pady=5)
+
+        # Smoothing slider
+        ttk.Label(frame, text="Smoothing:").grid(row=1, column=0, padx=5, pady=5)
+        self.smoothing_var = tk.DoubleVar(value=0.5)
+        smoothing_slider = ttk.Scale(
+            frame,
+            from_=0.0,
+            to=0.9,
+            variable=self.smoothing_var,
+            orient=tk.HORIZONTAL,
+            length=200,
+            command=self.update_cursor_smoothing
+        )
+        smoothing_slider.grid(row=1, column=1, padx=5, pady=5)
+        ttk.Label(frame, textvariable=self.smoothing_var).grid(row=1, column=2, padx=5, pady=5)
+
+        # Calibration button
+        ttk.Button(
+            frame,
+            text="Calibrate Sensor",
+            command=self.calibrate_sensor
+        ).grid(row=2, column=0, padx=5, pady=5)
+
+        ttk.Button(
+            frame,
+            text="Calibrate Tilt",
+            command=self.calibrate_tilt
+        ).grid(row=2, column=1, padx=5, pady=5)
+
+        self.calibration_var = tk.StringVar(value="Not calibrated")
+        ttk.Label(frame, textvariable=self.calibration_var).grid(row=2, column=2, padx=5, pady=5)
+
+        return frame
 
     def set_cursor_mode(self):
-        """Switch to cursor control mode"""
-        if self.controller.wifi_handler.is_connected():
-            self.controller.wifi_handler.write(b"CURSOR_MODE\n")
-            self.status_var.set("Cursor Mode Active")
+        """Switch to cursor mode"""
+        if self.wifi_handler.is_connected():
+            self.wifi_handler.write("CURSOR_MODE\n")
+            self.logger.info("Switched to cursor mode")
 
     def set_gesture_mode(self):
-        """Switch to gesture control mode"""
-        if self.controller.wifi_handler.is_connected():
-            self.controller.wifi_handler.write(b"GESTURE_MODE\n")
-            self.status_var.set("Gesture Mode Active")
+        """Switch to gesture mode"""
+        if self.wifi_handler.is_connected():
+            self.wifi_handler.write("GESTURE_MODE\n")
+            self.logger.info("Switched to gesture mode")
+    
+    def set_idle_mode(self):
+        """Switch to idle mode"""
+        if self.wifi_handler.is_connected():
+            self.wifi_handler.write("IDLE_MODE\n")
+            self.logger.info("Switched to idle mode")
+
+    def create_gesture_frame(self, parent):
+        """Create simplified gesture frame"""
+        frame = ttk.LabelFrame(parent, text="Gesture Control", padding=10)
+
+        # Gesture mode button
+        ttk.Button(
+            frame,
+            text="Gesture Mode",
+            command=self.set_gesture_mode
+        ).grid(row=0, column=0, padx=5, pady=5)
+
+        # Recognized gesture display
+        self.recognized_gesture = tk.StringVar(value="No gesture detected")
+        ttk.Label(frame, text="Last Gesture:").grid(row=1, column=0, padx=5, pady=5)
+        ttk.Label(frame, textvariable=self.recognized_gesture,
+                font=('Arial', 14, 'bold')).grid(row=1, column=1, padx=5, pady=5)
+
+        return frame
+
+    def record_multiple_samples(self):
+        """Record multiple samples of the current gesture"""
+        gesture_name = self.gesture_name.get()
+        if not gesture_name:
+            self.gesture_status.set("Please enter a gesture name")
+            return
+
+        # Ask user how many samples to record
+        num_samples = simpledialog.askinteger(
+            "Samples",
+            "How many samples to record?",
+            initialvalue=5,
+            minvalue=1,
+            maxvalue=20
+        )
+
+        if not num_samples:
+            return  # User cancelled
+
+        # Disable buttons during recording
+        self.record_button['state'] = 'disabled'
+        self.record_multiple_btn['state'] = 'disabled'
+
+        # Start recording in a separate thread
+        threading.Thread(
+            target=self.record_multiple_gestures_thread,
+            args=(gesture_name, num_samples)
+        ).start()
+
+    def record_multiple_gestures_thread(self, gesture_name, num_samples):
+        """Thread to record multiple samples of the same gesture"""
+        # Switch to gesture mode
+        self.wifi_handler.write("GESTURE_MODE\n")
+
+        for i in range(num_samples):
+            # Update UI
+            self.gesture_status.set(f"Prepare for sample {i+1}/{num_samples}...")
+            self.log(f"Recording sample {i+1}/{num_samples} for gesture '{gesture_name}'")
+
+            # Wait for user to prepare
+            time.sleep(2)
+
+            # Start recording
+            self.gesture_status.set(f"RECORDING NOW - Perform gesture {i+1}/{num_samples}!")
+            self.log("RECORDING NOW - Perform the gesture!")
+            self.gesture_handler.start_recording(f"{gesture_name}_{i+1}")
+
+            # Record for 3 seconds
+            time.sleep(3)
+
+            # Stop recording
+            samples = self.gesture_handler.stop_recording()
+
+            if samples > 10:  # Ensure we have enough data points
+                self.log(f"Sample {i+1} recorded successfully ({samples} samples)")
+            else:
+                self.log(f"Sample {i+1} failed - not enough data")
+                i -= 1  # Try again
+
+            # Wait between recordings
+            time.sleep(1)
+
+        # Update UI
+        self.gesture_status.set(f"Recorded {num_samples} samples for '{gesture_name}'")
+        self.log(f"Completed recording {num_samples} samples for gesture '{gesture_name}'")
+
+        # Update the listbox
+        self.update_gesture_list()
+
+        # Switch back to idle mode
+        self.wifi_handler.write("IDLE_MODE\n")
+
+        # Re-enable buttons
+        self.root.after(0, lambda: self.record_button.configure(state='normal'))
+        self.root.after(0, lambda: self.record_multiple_btn.configure(state='normal'))
+    
+    def toggle_recording(self):
+        """Start or stop recording a gesture"""
+        if self.record_button['text'] == "Start Recording":
+            gesture_name = self.gesture_name.get()
+            if not gesture_name:
+                self.gesture_status.set("Please enter a gesture name")
+                return
+
+            # Switch to gesture mode
+            self.wifi_handler.write("GESTURE_MODE\n")
+
+            # Start recording
+            self.gesture_handler.start_recording(gesture_name)
+            self.gesture_status.set(f"Recording gesture: {gesture_name}...")
+            self.record_button['text'] = "Stop Recording"
+
+            # Schedule a function to update the UI during recording
+            self.root.after(100, self.update_recording_status)
+        else:
+            # Stop recording
+            samples = self.gesture_handler.stop_recording()
+            self.gesture_status.set(f"Recorded {samples} samples")
+            self.record_button['text'] = "Start Recording"
+
+            # Update the listbox
+            self.update_gesture_list()
+
+            # Switch back to idle mode
+            self.wifi_handler.write("IDLE_MODE\n")
+
+    def update_recording_status(self):
+        """Update the UI during recording"""
+        if self.record_button['text'] == "Stop Recording":
+            samples = self.gesture_handler.get_current_samples()
+            self.gesture_status.set(f"Recording... ({samples} samples)")
+            self.root.after(100, self.update_recording_status)
+
+    def update_gesture_list(self):
+        """Update the list of recorded gestures"""
+        self.gesture_listbox.delete(0, tk.END)
+        for gesture in self.gesture_handler.get_gestures():
+            self.gesture_listbox.insert(tk.END, gesture)
+
+    def update_cursor_speed(self, *args):
+        """Update cursor speed"""
+        speed = self.speed_var.get()
+        self.mouse_controller.set_cursor_speed(speed)
+        self.logger.info(f"Updated cursor speed: {speed}")
+    
+    def update_cursor_smoothing(self, *args):
+        """Update cursor smoothing"""
+        smoothing = self.smoothing_var.get()
+        self.mouse_controller.set_smoothing(smoothing)
+        self.logger.info(f"Updated cursor smoothing: {smoothing}")
+    
+    def center_window(self):
+        """Center the window on the screen"""
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def train_gesture_model(self):
+        """Train the gesture recognition model"""
+        self.gesture_status.set("Training model...")
+        success = self.gesture_handler.train_model()
+        if success:
+            self.gesture_status.set("Model trained successfully")
+        else:
+            self.gesture_status.set("Failed to train model")
+
+    def handle_recognized_gesture(self, gesture):
+        """Handle recognized gestures"""
+        self.recognized_gesture.set(gesture)
+
+        # Map to specific actions
+        if gesture == "UP":
+            import pyautogui
+            pyautogui.press('up')
+        elif gesture == "DOWN":
+            pyautogui.press('down')
+        elif gesture == "LEFT":
+            pyautogui.press('left')
+        elif gesture == "RIGHT":
+            pyautogui.press('right')
+        elif gesture == "SLIGHT_DOWN":
+            pyautogui.press('pagedown')
 
     def update_calibration_progress(self, progress):
         """Update the calibration progress bar"""
@@ -144,33 +392,37 @@ class AirMouseGUI:
         self.root.update_idletasks()
 
     def calibrate_sensor(self):
-        """Handle sensor calibration"""
-        self.status_var.set("Calibrating...")
-        self.calibrate_button['state'] = 'disabled'
-        self.progress_var.set(0)
-
-        def calibrate_thread():
-            if self.controller.calibrate():
-                self.status_var.set("Calibration Complete")
-            else:
-                self.status_var.set("Calibration Failed")
-            self.calibrate_button['state'] = 'normal'
-
-        threading.Thread(target=calibrate_thread, daemon=True).start()
+        """Calibrate the sensor"""
+        if self.wifi_handler.is_connected():
+            self.wifi_handler.write("CALIBRATE\n")
+            self.calibration_var.set("Calibrating...")
+            self.logger.info("Started sensor calibration")
 
     def calibrate_tilt(self):
-        if not self.controller.wifi_handler.is_connected():
-            self.status_var.set("Not connected to device")
-            return
-
-        self.status_var.set("Starting tilt calibration...")
-        self.controller.wifi_handler.write(b"CALIBRATE_TILT\n")
+        """Calibrate tilt"""
+        if self.wifi_handler.is_connected():
+            self.wifi_handler.write("CALIBRATE_TILT\n")
+            self.calibration_var.set("Calibrating tilt...")
+            self.logger.info("Started tilt calibration")
 
     def toggle_connection(self):
+        """Connect or disconnect from ESP32"""
         if self.connect_button['text'] == "Connect":
-            self.start_controller()
+            ip = self.ip_var.get()
+            if self.wifi_handler.connect(ip):
+                self.status_var.set("Connected")
+                self.connect_button['text'] = "Disconnect"
+                self.logger.info(f"Connected to ESP32 at {ip}")
+            else:
+                self.status_var.set("Connection failed")
+                self.logger.error(f"Failed to connect to ESP32 at {ip}")
         else:
-            self.stop_controller()
+            if self.wifi_handler.disconnect():
+                self.status_var.set("Disconnected")
+                self.connect_button['text'] = "Connect"
+                self.logger.info("Disconnected from ESP32")
+            else:
+                self.logger.error("Failed to disconnect from ESP32")
 
     def start_controller(self):
         ip_address = self.ip_var.get()
@@ -210,8 +462,27 @@ class AirMouseGUI:
         self.status_var.set(message)
 
     def run(self):
+        """Run the application"""
         self.root.mainloop()
 
-if __name__ == "__main__":
+class TextHandler(logging.Handler):
+    """Handler to redirect log messages to a tkinter Text widget"""
+    def __init__(self, text_widget):
+        logging.Handler.__init__(self)
+        self.text_widget = text_widget
+
+    def emit(self, record):
+        msg = self.format(record)
+        def append():
+            self.text_widget.configure(state='normal')
+            self.text_widget.insert(tk.END, msg + '\n')
+            self.text_widget.see(tk.END)
+            self.text_widget.configure(state='disabled')
+        self.text_widget.after(0, append)
+
+def main():
     app = AirMouseGUI()
     app.run()
+
+if __name__ == "__main__":
+    main()

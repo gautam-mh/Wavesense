@@ -7,6 +7,14 @@ from gesture_handler import GestureHandler
 class MouseController:
     def __init__(self):
         self.logger = logging.getLogger('AirMouse.Controller')
+
+        # Initialize all attributes
+        self.cursor_speed = 5.0
+        self.smoothing_factor = 0.5
+        self.current_vx = 0.0
+        self.current_vy = 0.0
+        self.gesture_callback = None  # Initialize gesture_callback
+
         self.wifi_handler = WiFiHandler()
         self.gesture_handler = GestureHandler()
         self.is_running = False
@@ -31,6 +39,15 @@ class MouseController:
         # Configure PyAutoGUI
         pyautogui.FAILSAFE = False
         pyautogui.PAUSE = 0.001
+
+        self.logger.info("MouseController initialized")
+        print("MouseController initialized with speed:", self.cursor_speed)
+
+    def set_smoothing(self, smoothing):
+        """Set smoothing factor"""
+        self.smoothing_factor = smoothing
+        self.smoothing = smoothing  # Update both for consistency
+        self.logger.info(f"Smoothing factor set to {smoothing}")
 
     def connect(self, ip_address, port=80):
         """Connect to ESP32 via WiFi"""
@@ -129,131 +146,146 @@ class MouseController:
     def process_data(self, data):
         """Process incoming data from ESP32"""
         try:
-            # Debug output to help troubleshoot
-            self.logger.debug(f"Received data: {data}")
-
-            # Handle initialization
-            if data == "INIT_COMPLETE":
-                self.initialized = True
-                self.logger.info("Device initialized successfully")
-                return
-
-            # Handle calibration data
-            if "CALIBRATION_START" in data:
-                self.logger.info("Calibration in progress...")
-                if self.calibration_callback:
-                    self.calibration_callback(0)
-                return
-
-            if "TILT_CALIBRATION_START" in data:
-                self.logger.info("Tilt calibration in progress...")
-                self.tilt_calibrating = True
-                if self.calibration_callback:
-                    self.calibration_callback(0)
-                return
-
-            if "CALIBRATION_PROGRESS" in data:
-                try:
-                    progress = int(data.split(',')[1])
-                    if self.calibration_callback:
-                        self.calibration_callback(progress)
-                except:
-                    self.logger.error(f"Invalid progress data: {data}")
-                return
-
-            if "CALIBRATION_COMPLETE" in data:
-                self.logger.info("Calibration completed")
-                self.is_calibrating = False
-                if self.calibration_callback:
-                    self.calibration_callback(100)
-                return
-
-            if "TILT_CALIBRATION_COMPLETE" in data:
-                self.logger.info("Tilt calibration completed")
-                self.tilt_calibrating = False
-                if self.calibration_callback:
-                    self.calibration_callback(100)
-                return
-
-            if "CALIBRATION_FAILED" in data:
-                self.logger.error("Calibration failed")
-                self.is_calibrating = False
-                self.tilt_calibrating = False
-                if self.calibration_callback:
-                    self.calibration_callback(-1)  # Negative value indicates failure
-                return
-
-            # Handle mode change confirmations
-            if data == "MODE_GESTURE":
-                self.logger.info("Device switched to gesture mode")
-                return
-
-            if data == "MODE_CURSOR":
-                self.logger.info("Device switched to cursor mode")
-                return
-
-            # Handle gesture data
-            if data.startswith("GESTURE,"):
-                gesture = data.split(',')[1].strip()
-                self.logger.info(f"Received gesture: {gesture}")
-                self.gesture_handler.process_gesture(gesture)
-                return
+            print(f"Received: {data}")  # Debug print
 
             # Handle cursor data
             if data.startswith("CURSOR,"):
                 parts = data.split(',')
-                if len(parts) >= 3:  # Changed from == 3 to >= 3 for more flexibility
-                    try:
-                        vx = float(parts[1])
-                        vy = float(parts[2])
-                        self.move_cursor(vx, vy)
-                    except ValueError:
-                        self.logger.error(f"Invalid cursor data format: {data}")
+                if len(parts) == 3:
+                    vx = float(parts[1])
+                    vy = float(parts[2])
+                    print(f"Moving cursor: {vx}, {vy}")  # Debug print
+                    self.move_cursor(vx, vy)
                 return
 
-            # Handle cursor centered command
-            if data == "CURSOR_CENTERED":
-                self.center_cursor()
+            # Handle gesture data
+            if data.startswith("GESTURE,"):
+                if self.gesture_callback:
+                    self.gesture_callback(data)
                 return
+
+            if data.startswith("GESTURE_DETECTED,"):
+                current_time = time.time()
+                gesture = data.split(',')[1].strip()
+
+
+                if (not hasattr(self, 'last_gesture') or
+                    gesture != self.last_gesture or
+                    current_time - self.last_gesture_time > 0.5):  # 500ms cooldown
+
+                    self.last_gesture = gesture
+                    self.last_gesture_time = current_time
+                    self.handle_gesture(gesture)
+        
+            # Handle calibration progress
+            if data.startswith("CALIBRATION_PROGRESS,"):
+                progress = int(data.split(',')[1])
+                print(f"Calibration progress: {progress}%")
+                if self.calibration_callback:
+                    self.calibration_callback(progress)
+                return
+
+            # Handle calibration completion
+            if data == "CALIBRATION_COMPLETE":
+                print("Calibration complete")
+                self.is_calibrating = False
+                if self.calibration_callback:
+                    self.calibration_callback(100)  # 100% complete
+                return
+
+            # Handle tilt calibration progress
+            if data.startswith("TILT_CALIBRATION_PROGRESS,"):
+                progress = int(data.split(',')[1])
+                print(f"Tilt calibration progress: {progress}%")
+                if self.calibration_callback:
+                    self.calibration_callback(progress)
+                return
+
+            # Handle tilt calibration completion
+            if data == "TILT_CALIBRATION_COMPLETE":
+                print("Tilt calibration complete")
+                self.tilt_calibrating = False
+                if self.calibration_callback:
+                    self.calibration_callback(100)  # 100% complete
+                return
+
+            # Handle mode changes
+            if data == "MODE_CURSOR":
+                print("Switched to cursor mode")
+                return
+
+            if data == "MODE_GESTURE":
+                print("Switched to gesture mode")
+                return
+
+            if data == "MODE_IDLE":
+                print("Switched to idle mode")
+                return
+
+            # Handle initialization
+            if data == "INIT_COMPLETE":
+                print("ESP32 initialization complete")
+                self.initialized = True
+                return
+
+            # Unknown data
+            print(f"Unknown data: {data}")
 
         except Exception as e:
             self.logger.error(f"Data processing error: {e}")
+            print(f"Error: {e}")
 
-    def move_cursor(self, vx, vy):
-        """Move the cursor based on tilt angles"""
+    def handle_gesture(self, gesture):
+        """Handle pre-defined gestures"""
         try:
-            # Apply smoothing
-            vx = vx * (1 - self.smoothing) + self.prev_x * self.smoothing
-            vy = vy * (1 - self.smoothing) + self.prev_y * self.smoothing
+            import pyautogui
 
-            # Store values for next smoothing
-            self.prev_x = vx
-            self.prev_y = vy
+            if gesture == "UP":
+                pyautogui.press('up')
+            elif gesture == "DOWN":
+                pyautogui.press('down')
+            elif gesture == "SLIGHT_DOWN":
+                pyautogui.press('pagedown')  # Or another action
+            elif gesture == "LEFT":
+                pyautogui.press('left')
+            elif gesture == "RIGHT":
+                pyautogui.press('right')
 
-            # Apply movement threshold - lower threshold for tilt control
-            if abs(vx) < 0.05 and abs(vy) < 0.05:
-                return
-
-            # Scale by sensitivity
-            vx *= self.sensitivity
-            vy *= self.sensitivity
-
-            # Get current position
-            current_x, current_y = pyautogui.position()
-
-            # Calculate new position
-            new_x = current_x + vx
-            new_y = current_y + vy
-
-            # Ensure cursor stays within screen bounds
-            new_x = max(0, min(new_x, self.screen_width - 1))
-            new_y = max(0, min(new_y, self.screen_height - 1))
-
-            # Move cursor
-            pyautogui.moveTo(new_x, new_y)
+            self.logger.info(f"Executed gesture: {gesture}")
 
         except Exception as e:
+            self.logger.error(f"Gesture handling error: {e}")
+    
+    def move_cursor(self, vx, vy):
+        """Move the cursor based on sensor data"""
+        try:
+            # Apply sensitivity
+            vx *= self.cursor_speed
+            vy *= self.cursor_speed
+
+            # Apply smoothing
+            self.current_vx = self.current_vx * self.smoothing_factor + vx * (1 - self.smoothing_factor)
+            self.current_vy = self.current_vy * self.smoothing_factor + vy * (1 - self.smoothing_factor)
+
+            # Only move if above threshold
+            if abs(self.current_vx) > 0.1 or abs(self.current_vy) > 0.1:
+                # Get current position
+                current_x, current_y = pyautogui.position()
+
+                # Calculate new position
+                new_x = current_x + int(self.current_vx)
+                new_y = current_y + int(self.current_vy)
+
+                # Ensure cursor stays within screen boundaries
+                new_x = max(0, min(new_x, self.screen_width - 1))
+                new_y = max(0, min(new_y, self.screen_height - 1))
+
+                # Move cursor
+                pyautogui.moveTo(new_x, new_y)
+                print(f"Moved cursor to: {new_x}, {new_y}")
+        except Exception as e:
             self.logger.error(f"Error moving cursor: {e}")
+            print(f"Cursor error: {e}")
 
     def center_cursor(self):
         """Center the cursor on the screen"""
@@ -268,13 +300,14 @@ class MouseController:
         self.initialized = value
 
     def set_cursor_speed(self, speed):
-        """Set the cursor speed"""
-        self.sensitivity = speed
-        self.logger.info(f"Cursor speed set to: {speed}")
+        """Set cursor speed"""
+        self.cursor_speed = speed
+        self.logger.info(f"Cursor speed set to {speed}")
 
     def set_smoothing_factor(self, factor):
         """Set the smoothing factor"""
-        self.smoothing = max(0.0, min(0.95, factor))  # Clamp between 0 and 0.95
+        self.smoothing_factor = max(0.0, min(0.95, factor))  # Clamp between 0 and 0.95
+        self.smoothing = self.smoothing_factor  # Keep both in sync
         self.logger.info(f"Smoothing factor set to: {factor}")
 
     def set_cursor_mode(self):
@@ -294,3 +327,8 @@ class MouseController:
 
         self.wifi_handler.write(b"GESTURE_MODE\n")
         return True
+
+    def set_gesture_callback(self, callback):
+        """Set callback for gesture data"""
+        self.gesture_callback = callback
+        self.logger.info("Gesture callback set")

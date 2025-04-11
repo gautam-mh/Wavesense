@@ -4,395 +4,347 @@
 #include "MPU6050_6Axis_MotionApps20.h"
 #include <WiFi.h>
 
+void calibrateSensor();
+void calibrateTilt();
+void handleGestureMode();
+void handleCursorMode();
+void sendCursorData(float vx, float vy);
+float calculateTiltX(int16_t ax, int16_t ay, int16_t az);
+float calculateTiltZ(int16_t ax, int16_t ay, int16_t az);
+
 // AP mode credentials
-const char* ap_ssid = "ESP32-AirMouse";
-const char* ap_password = "password";
+const char *ap_ssid = "ESP32";
+const char *ap_password = "password";
 
 // Create a WiFi server on port 80
 WiFiServer server(80);
 WiFiClient client;
 
 MPU6050 mpu;
+
+// Raw sensor readings
 int16_t ax, ay, az, gx, gy, gz;
-int vx, vy;
-int gx_offset = 0;
-int gz_offset = 0;
+
+// Calibration offsets
+int gx_offset = 0, gy_offset = 0, gz_offset = 0;
+float tilt_x_zero = 0.0, tilt_z_zero = 0.0;
+
+// Operation flags
 bool isCalibrating = false;
 bool isInitialized = false;
-bool isFirstConnect = true;
 bool isGestureMode = false;
 bool clientConnected = false;
 
-Quaternion q;           // quaternion container
-VectorFloat gravity;    // gravity vector
-float ypr[3];           // yaw/pitch/roll container
-uint16_t packetSize = 42;    // expected DMP packet size
-uint16_t fifoCount;     // count of all bytes currently in FIFO
-uint8_t fifoBuffer[64]; // FIFO storage buffer
-uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
-float yaw = 0.0, pitch = 0.0, roll = 0.0;
-float vertZero = 0, horzZero = 0;
-float vertValue, horzValue;
-float prev_vx = 0, prev_vy = 0;
+// DMP variables
+Quaternion q;
+VectorFloat gravity;
+float ypr[3];
+uint16_t packetSize = 42;
+uint8_t fifoBuffer[64];
 
-// Cursor control constants
-const float MOUSE_SPEED = 5.0;         // Multiplier for cursor movement
-const float TILT_THRESHOLD = 10.0;     // Minimum tilt angle to start movement
-const float MAX_TILT = 45.0;           // Tilt angle for maximum speed
-const float BASE_SPEED = 2.0;          // Base cursor speed
-const float MAX_SPEED = 15.0;          // Maximum cursor speed
-const float DEADZONE = 2.0;            // Deadzone to prevent drift
-const float SMOOTHING_FACTOR = 0.8;    // Higher = more smoothing (0.0-1.0)
-
-// Gesture thresholds
-const int THRESHOLD_LOW = 80;
-const int THRESHOLD_HIGH = 145;
-const int NEUTRAL_LOW = 100;
-const int NEUTRAL_HIGH = 170;
+// Gesture detection thresholds
+const int GESTURE_UP_THRESHOLD = 10000;
+const int GESTURE_DOWN_THRESHOLD = -15000;
+const int GESTURE_LEFT_THRESHOLD = 10000;
+const int GESTURE_RIGHT_THRESHOLD = -10000;
+const int GESTURE_SLIGHT_DOWN_THRESHOLD = -5000;
 
 // Calibration settings
 const int CALIBRATION_SAMPLES = 100;
 const int SAMPLE_DELAY = 10;
 const int MOVEMENT_THRESHOLD = 1000;
 
-float pitch_offset = 0;
-float roll_offset = 0;
-bool tilt_calibrated = false;
+unsigned long lastGestureTime = 0;
+const unsigned long GESTURE_COOLDOWN = 500; // 500ms cooldown
+String lastGesture = "";
 
 // Pin definitions
 const int SDA_PIN = 21;
 const int SCL_PIN = 22;
 
-// Last gesture tracking
-unsigned long lastGestureTime = 0;
-const unsigned long GESTURE_COOLDOWN = 500;
-
-// Function prototypes - required for .cpp files
-void calibrateSensor();
-void calibrateTilt();
-void handleGestureMode();
-void sendMotionData();
-float sign(float value);
-
-// Helper function for sign
-float sign(float value) {
-    if (value > 0) return 1.0;
-    if (value < 0) return -1.0;
-    return 0.0;
-}
-
 void setup() {
+    // Initialize Serial first for debugging
     Serial.begin(115200);
     delay(1000);
     
-    // Start Access Point
+    // Initialize WiFi
     WiFi.softAP(ap_ssid, ap_password);
-    Serial.println("Access Point started");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.softAPIP());  // Usually 192.168.4.1
-    
-    // Start the server
+    WiFi.softAPConfig(IPAddress(192,168,4,1), IPAddress(192,168,4,1), IPAddress(255,255,255,0));
     server.begin();
-    Serial.println("Server started");
     
-    Wire.begin(SDA_PIN, SCL_PIN);
-    Serial.println("Initializing MPU6050...");
-    
+    // Initialize MPU6050
+    Wire.begin(21, 22); // SDA, SCL
     mpu.initialize();
-    mpu.dmpInitialize();
-
-    // These offsets may need to be calibrated for your specific sensor
-    mpu.setXGyroOffset(220);
-    mpu.setYGyroOffset(76);
-    mpu.setZGyroOffset(-85);
-    mpu.setZAccelOffset(1788);
-    
-    mpu.setDMPEnabled(true);
     
     if (!mpu.testConnection()) {
         Serial.println("MPU6050 connection failed!");
-        while (1) {
-            delay(1000);
-        }
+        while(1);
     }
     
     mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_1000);
     mpu.setDLPFMode(MPU6050_DLPF_BW_20);
     
-    Serial.println("MPU6050 connection successful!");
-    
-    isInitialized = true;
-    isFirstConnect = true;
-}
+    Serial.println("System initialized");
+  }
 
-void loop() {
-    // Check if a client has connected
-    if (!clientConnected) {
+void loop()
+{
+    // Handle client connections
+    if (!clientConnected)
+    {
         client = server.available();
-        if (client) {
+        if (client)
+        {
             Serial.println("New client connected");
             clientConnected = true;
             client.println("INIT_COMPLETE");
         }
-    } else {
+    }
+    else
+    {
         // Check if client is still connected
-        if (!client.connected()) {
+        if (!client.connected())
+        {
             Serial.println("Client disconnected");
             clientConnected = false;
             return;
         }
-        
-        // Check for incoming commands
-        if (client.available()) {
+
+        // Process incoming commands
+        if (client.available())
+        {
             String command = client.readStringUntil('\n');
             command.trim();
-            
-            if (command == "INIT_CHECK") {
+
+            if (command == "INIT_CHECK")
+            {
                 client.println("INIT_COMPLETE");
             }
-            else if (command == "CALIBRATE") {
+            else if (command == "CALIBRATE")
+            {
                 calibrateSensor();
             }
-            else if (command == "GESTURE_MODE") {
+            else if (command == "GESTURE_MODE")
+            {
                 isGestureMode = true;
-                isCalibrating = false;
                 client.println("MODE_GESTURE");
             }
-            else if (command == "CURSOR_MODE") {
+            else if (command == "CURSOR_MODE")
+            {
                 isGestureMode = false;
-                isCalibrating = false;
                 client.println("MODE_CURSOR");
             }
-            else if (command == "CALIBRATE_TILT") {
+            else if (command == "CALIBRATE_TILT")
+            {
                 calibrateTilt();
             }
-            else if (command == "CENTER_CURSOR") {
-                // This will be handled by Python to center the cursor
-                client.println("CURSOR_CENTERED");
-            }
         }
 
-        // Send sensor data
-        if (!isCalibrating && isInitialized) {
-            if (isGestureMode) {
+        // Send sensor data based on mode
+        if (!isCalibrating && isInitialized)
+        {
+            if (isGestureMode)
+            {
                 handleGestureMode();
-            } else {
-                sendMotionData();
+            }
+            else
+            {
+                handleCursorMode();
             }
         }
     }
-    
-    delay(20);  // 50Hz update rate
+
+    delay(20); // 50Hz update rate
 }
 
-void handleGestureMode() {
-    // Get motion data
+void handleCursorMode()
+{
     mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    
-    // Map acceleration values
-    byte mappedX = map(ax, -17000, 17000, 0, 255);
-    byte mappedY = map(ay, -17000, 17000, 0, 255);
-    
-    // Debug output (optional)
-    if (clientConnected) {
-        client.print("DEBUG,X=");
-        client.print(mappedX);
-        client.print(",Y=");
-        client.println(mappedY);
+
+    // Apply calibration offsets
+    float cal_gx = gx - gx_offset;
+    float cal_gy = gy - gy_offset;
+    float cal_gz = gz - gz_offset;
+
+    // Calculate tilt angles (using calibrated values)
+    float tilt_x = atan2(ay, az) * 180.0 / PI - tilt_x_zero;
+    float tilt_z = atan2(ax, az) * 180.0 / PI - tilt_z_zero;
+
+    // Calculate cursor movement (simplified example)
+    float vx = constrain(tilt_z * 0.5, -10, 10);
+    float vy = constrain(tilt_x * 0.5, -10, 10);
+
+    // Send cursor data
+    if (clientConnected)
+    {
+        client.print("CURSOR,");
+        client.print(vx);
+        client.print(",");
+        client.println(vy);
     }
-    
-    // Apply cooldown to prevent rapid gesture triggers
-    unsigned long currentTime = millis();
-    if (currentTime - lastGestureTime < GESTURE_COOLDOWN) {
+}
+
+void handleGestureMode()
+{
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+    // Apply calibration offsets
+    float cal_gx = gx - gx_offset;
+    float cal_gy = gy - gy_offset;
+    float cal_gz = gz - gz_offset;
+
+    if (millis() - lastGestureTime < GESTURE_COOLDOWN) {
         return;
     }
+
+    // Detect gestures
+    String currentGesture = "";
+    if (cal_gy > GESTURE_UP_THRESHOLD) {
+        currentGesture = "UP";
+    } 
+    else if (cal_gy < GESTURE_DOWN_THRESHOLD) {
+        currentGesture = "DOWN";
+    }
+    else if (cal_gy < GESTURE_SLIGHT_DOWN_THRESHOLD) {
+        // Only register SLIGHT_DOWN if not currently in DOWN state
+        if (lastGesture != "DOWN") {
+            currentGesture = "SLIGHT_DOWN";
+        } 
+    }
+    else if (cal_gx > GESTURE_LEFT_THRESHOLD) {
+        currentGesture = "LEFT";
+    }
+    else if (cal_gx < GESTURE_RIGHT_THRESHOLD) {
+        currentGesture = "RIGHT";
+    }
+
+    if (currentGesture != "" && currentGesture != lastGesture) {
+        if (clientConnected) {
+            client.print("GESTURE_DETECTED,");
+            client.println(currentGesture);
+        }
+        lastGesture = currentGesture;
+        lastGestureTime = millis();
+    }
     
-    // Check for gestures
-    if (mappedY < THRESHOLD_LOW) {
-        if (clientConnected) client.println("GESTURE,DOWN");  // gesture 1
-        lastGestureTime = currentTime;
-    }
-    else if (mappedY > THRESHOLD_HIGH) {
-        if (clientConnected) client.println("GESTURE,UP");  // gesture 2
-        lastGestureTime = currentTime;
-    }
-    else if (mappedX > THRESHOLD_HIGH) {
-        if (clientConnected) client.println("GESTURE,LEFT");  // gesture 3
-        lastGestureTime = currentTime;
-    }
-    else if (mappedX < THRESHOLD_LOW) {
-        if (clientConnected) client.println("GESTURE,RIGHT");  // gesture 4
-        lastGestureTime = currentTime;
-    }
-    else if (mappedX > NEUTRAL_LOW && mappedX < NEUTRAL_HIGH && 
-             mappedY > THRESHOLD_LOW && mappedY < 130) {
-        if (clientConnected) client.println("GESTURE,SLIGHT_DOWN");  // gesture 5
-        lastGestureTime = currentTime;
+    // Reset lastGesture if we're back to neutral
+    if (abs(cal_gx) < (GESTURE_LEFT_THRESHOLD/2) && 
+        abs(cal_gy) < (GESTURE_UP_THRESHOLD/2)) {
+        lastGesture = "";
     }
 }
 
-void calibrateSensor() {
-    if (clientConnected) client.println("CALIBRATION_START");
+void calibrateSensor()
+{
+    if (clientConnected)
+        client.println("CALIBRATION_START");
     isCalibrating = true;
-    
-    long gx_sum = 0;
-    long gz_sum = 0;
+
+    long gx_sum = 0, gy_sum = 0, gz_sum = 0;
     int valid_samples = 0;
-    
-    for(int i = 0; i < CALIBRATION_SAMPLES; i++) {
+
+    for (int i = 0; i < CALIBRATION_SAMPLES; i++)
+    {
         mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-        
-        if (abs(gx) < MOVEMENT_THRESHOLD && abs(gz) < MOVEMENT_THRESHOLD) {
+
+        // Only use stable samples
+        if (abs(gx) < MOVEMENT_THRESHOLD &&
+            abs(gy) < MOVEMENT_THRESHOLD &&
+            abs(gz) < MOVEMENT_THRESHOLD)
+        {
             gx_sum += gx;
+            gy_sum += gy;
             gz_sum += gz;
             valid_samples++;
         }
-        
-        int progress = ((i + 1) * 100) / CALIBRATION_SAMPLES;
-        if (clientConnected) {
+
+        // Send progress
+        if (clientConnected)
+        {
             client.print("CALIBRATION_PROGRESS,");
-            client.println(progress);
+            client.println((i * 100) / CALIBRATION_SAMPLES);
         }
-        
         delay(SAMPLE_DELAY);
     }
-    
-    if (valid_samples > 0) {
+
+    // Calculate new offsets
+    if (valid_samples > 0)
+    {
         gx_offset = gx_sum / valid_samples;
+        gy_offset = gy_sum / valid_samples;
         gz_offset = gz_sum / valid_samples;
     }
-    
+
     isCalibrating = false;
-    if (clientConnected) client.println("CALIBRATION_COMPLETE");
+    if (clientConnected)
+    {
+        client.println("CALIBRATION_COMPLETE");
+        client.print("Offsets - gx: ");
+        client.print(gx_offset);
+        client.print(", gy: ");
+        client.print(gy_offset);
+        client.print(", gz: ");
+        client.println(gz_offset);
+    }
 }
 
-void calibrateTilt() {
-    if (clientConnected) client.println("TILT_CALIBRATION_START");
+void calibrateTilt()
+{
+    if (clientConnected)
+        client.println("TILT_CALIBRATION_START");
     isCalibrating = true;
-    
-    // Variables for averaging
-    float pitch_sum = 0;
-    float roll_sum = 0;
-    
-    // Collect samples
-    for(int i = 0; i < CALIBRATION_SAMPLES; i++) {
+
+    float tilt_x_sum = 0, tilt_z_sum = 0;
+
+    for (int i = 0; i < CALIBRATION_SAMPLES; i++)
+    {
         mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-        
-        // Calculate tilt angles
-        float accel_x = ax;
-        float accel_y = ay;
-        float accel_z = az;
-        
-        float pitch = atan2(accel_y, sqrt(accel_x * accel_x + accel_z * accel_z)) * 180.0 / PI;
-        float roll = atan2(-accel_x, accel_z) * 180.0 / PI;
-        
-        pitch_sum += pitch;
-        roll_sum += roll;
-        
+
+        // Calculate current tilt
+        tilt_x_sum += atan2(ay, az) * 180.0 / PI;
+        tilt_z_sum += atan2(ax, az) * 180.0 / PI;
+
         // Send progress
-        int progress = ((i + 1) * 100) / CALIBRATION_SAMPLES;
-        if (clientConnected) {
-            client.print("CALIBRATION_PROGRESS,");
-            client.println(progress);
+        if (clientConnected)
+        {
+            client.print("TILT_CALIBRATION_PROGRESS,");
+            client.println((i * 100) / CALIBRATION_SAMPLES);
         }
-        
         delay(SAMPLE_DELAY);
     }
-    
-    // Calculate offsets
-    pitch_offset = pitch_sum / CALIBRATION_SAMPLES;
-    roll_offset = roll_sum / CALIBRATION_SAMPLES;
-    tilt_calibrated = true;
-    
+
+    // Calculate neutral tilt positions
+    tilt_x_zero = tilt_x_sum / CALIBRATION_SAMPLES;
+    tilt_z_zero = tilt_z_sum / CALIBRATION_SAMPLES;
+
     isCalibrating = false;
-    if (clientConnected) {
+    if (clientConnected)
+    {
         client.println("TILT_CALIBRATION_COMPLETE");
-        client.print("Pitch offset: ");
-        client.print(pitch_offset);
-        client.print(", Roll offset: ");
-        client.println(roll_offset);
+        client.print("Tilt zeros - X: ");
+        client.print(tilt_x_zero);
+        client.print(", Z: ");
+        client.println(tilt_z_zero);
     }
 }
 
-void sendMotionData() {
-    mpuIntStatus = mpu.getIntStatus();
-    fifoCount = mpu.getFIFOCount();
-    
-    if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
-        // FIFO overflow - reset
-        mpu.resetFIFO();
-    } else if (mpuIntStatus & 0x02) {
-        // Wait for correct data length
-        while (fifoCount < packetSize) {
-            fifoCount = mpu.getFIFOCount();
-        }
-        
-        // Read packet from FIFO
-        mpu.getFIFOBytes(fifoBuffer, packetSize);
-        
-        // Get Quaternion, Gravity, and YPR
-        mpu.dmpGetQuaternion(&q, fifoBuffer);
-        mpu.dmpGetGravity(&gravity, &q);
-        mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-        
-        // Convert to degrees
-        yaw = ypr[0] * 180/M_PI;
-        pitch = ypr[1] * 180/M_PI;
-        roll = ypr[2] * 180/M_PI;
-        
-        // Calculate relative movement
-        vertValue = pitch - vertZero;
-        horzValue = roll - horzZero;
-        
-        // Update previous values
-        vertZero = pitch;
-        horzZero = roll;
-        
-        // Apply deadzone to filter out small movements
-        if (abs(horzValue) < DEADZONE) horzValue = 0;
-        if (abs(vertValue) < DEADZONE) vertValue = 0;
-        
-        // Apply adaptive sensitivity - faster movements get higher sensitivity
-        float sensitivity = BASE_SPEED;
-        if (abs(horzValue) > 5.0) sensitivity *= 1.5;
-        if (abs(horzValue) > 10.0) sensitivity *= 2.0;
-        
-        if (abs(vertValue) > 5.0) sensitivity *= 1.5;
-        if (abs(vertValue) > 10.0) sensitivity *= 2.0;
-        
-        // Calculate raw cursor velocity with non-linear response
-        float raw_vx = sign(horzValue) * pow(abs(horzValue), 1.5) * sensitivity;
-        float raw_vy = sign(vertValue) * pow(abs(vertValue), 1.5) * sensitivity;
-        
-        // Apply smoothing
-        float vx = (raw_vx * (1.0 - SMOOTHING_FACTOR)) + (prev_vx * SMOOTHING_FACTOR);
-        float vy = (raw_vy * (1.0 - SMOOTHING_FACTOR)) + (prev_vy * SMOOTHING_FACTOR);
-        
-        // Store for next iteration
-        prev_vx = vx;
-        prev_vy = vy;
-        
-        // Limit maximum speed
-        if (abs(vx) > MAX_SPEED) vx = (vx > 0) ? MAX_SPEED : -MAX_SPEED;
-        if (abs(vy) > MAX_SPEED) vy = (vy > 0) ? MAX_SPEED : -MAX_SPEED;
-        
-        if (clientConnected) {
-            client.print("CURSOR,");
-            client.print(vx);
-            client.print(",");
-            client.println(vy);
-        }
-        
-        // Debug output
-        Serial.print("YPR: ");
-        Serial.print(yaw);
-        Serial.print(", ");
-        Serial.print(pitch);
-        Serial.print(", ");
-        Serial.print(roll);
-        Serial.print(" | Movement: ");
-        Serial.print(vx);
-        Serial.print(", ");
-        Serial.println(vy);
+void sendCursorData(float vx, float vy)
+{
+    if (clientConnected)
+    {
+        client.print("CURSOR,");
+        client.print(vx);
+        client.print(",");
+        client.println(vy);
     }
+}
+
+float calculateTiltX(int16_t ax, int16_t ay, int16_t az)
+{
+    return atan2(ay, az) * 180.0 / PI;
+}
+
+float calculateTiltZ(int16_t ax, int16_t ay, int16_t az)
+{
+    return atan2(ax, az) * 180.0 / PI;
 }
