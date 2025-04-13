@@ -83,6 +83,7 @@ void setup() {
     
     mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_1000);
     mpu.setDLPFMode(MPU6050_DLPF_BW_20);
+    isInitialized = true;
     
     Serial.println("System initialized");
   }
@@ -348,3 +349,4 @@ float calculateTiltZ(int16_t ax, int16_t ay, int16_t az)
 {
     return atan2(ax, az) * 180.0 / PI;
 }
+

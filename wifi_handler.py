@@ -13,11 +13,16 @@ class WiFiHandler:
         self.read_thread = None
         self.running = False
         self.data_callback = None
+        self._lock = threading.Lock()  # Thread safety lock
 
     def connect(self, ip_address, port=80):
         """Connect to ESP32 via WiFi"""
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Set timeout and keepalive
+            self.socket.settimeout(5.0)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
             self.socket.connect((ip_address, port))
             self.connected = True
             self.logger.info(f"Connected to {ip_address}:{port}")
@@ -55,8 +60,10 @@ class WiFiHandler:
 
         try:
             if isinstance(data, str):
-                data = data.encode()
-            self.socket.sendall(data)
+                data = data.encode('utf-8')
+
+            with self._lock:  # Thread-safe write
+                self.socket.sendall(data)
             return True
         except Exception as e:
             self.logger.error(f"Write error: {e}")
@@ -73,8 +80,13 @@ class WiFiHandler:
                     self.connected = False
                     break
 
-                # Process received data
-                text = data.decode()
+                # Improved decoding with error handling
+                try:
+                    text = data.decode('utf-8').replace('\r', '')
+                except UnicodeDecodeError:
+                    self.logger.warning("Invalid UTF-8 data received")
+                    continue
+
                 lines = text.split('\n')
 
                 # Handle incomplete lines from previous reads
@@ -92,12 +104,29 @@ class WiFiHandler:
                 if lines[-1]:
                     self.buffer = lines[-1]
 
+            except socket.timeout:
+                continue
             except Exception as e:
                 self.logger.error(f"Read error: {e}")
                 self.connected = False
                 break
 
             time.sleep(0.01)
+
+    def debug_raw_data(self, duration=10):
+        """Log raw incoming data for debugging"""
+        start = time.time()
+        while time.time() - start < duration and self.connected:
+            try:
+                with self._lock:
+                    data = self.socket.recv(1024)
+                    print(f"RAW: {data}")  # Check if CURSOR,.* messages appear
+            except socket.timeout:
+                print("No data received for 1s")
+            except Exception as e:
+                print(f"Debug error: {e}")
+                break
+            time.sleep(0.1)
 
     def set_data_callback(self, callback):
         """Set callback for received data"""
@@ -106,3 +135,14 @@ class WiFiHandler:
     def is_connected(self):
         """Check if connected to ESP32"""
         return self.connected
+    
+    def debug_raw_data(self, duration=10):
+        """Log raw incoming data for debugging"""
+        start = time.time()
+        while time.time() - start < duration:
+            try:
+                data = self.socket.recv(1024)
+                print(f"RAW: {data}")  # Check if CURSOR,.* messages appear
+            except socket.timeout:
+                print("No data received for 1s")
+            time.sleep(0.1)
