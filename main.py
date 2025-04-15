@@ -8,6 +8,7 @@ from gesture_handler import GestureHandler
 import threading
 import time
 from tkinter import simpledialog
+import pyautogui  # For gesture actions
 
 class AirMouseGUI:
     def __init__(self):
@@ -25,7 +26,7 @@ class AirMouseGUI:
 
         # Set callbacks
         self.wifi_handler.set_data_callback(self.mouse_controller.process_data)
-        self.gesture_handler.set_callback(self.handle_recognized_gesture)
+        self.gesture_handler.register_callback("GESTURE", self.handle_gesture)
 
         # Set gesture callback in mouse controller
         self.mouse_controller.set_gesture_callback(self.gesture_handler.process_data)
@@ -35,6 +36,34 @@ class AirMouseGUI:
 
         # Center window
         self.center_window()
+
+        # Update gesture callbacks
+        self.setup_gesture_callbacks()
+
+    def setup_gestures():
+        gesture_handler = GestureHandler()
+
+        # Example bindings - modify these
+        gesture_handler.register_callback("UP", lambda: print("Volume up"))
+        gesture_handler.register_callback("DOWN", lambda: print("Volume down"))
+        gesture_handler.register_callback("CIRCLE", lambda: print("App switcher"))
+        gesture_handler.register_callback("SHAKE", lambda: print("Undo action"))
+
+        return gesture_handler
+    
+    def setup_gesture_callbacks(self):
+        """Bind actions to all gesture types"""
+        gestures = ["UP", "DOWN", "LEFT", "RIGHT", "CIRCLE", "SHAKE"]
+        actions = {
+            "UP": lambda: pyautogui.press('volumeup'),
+            "DOWN": lambda: pyautogui.press('volumedown'),
+            "LEFT": lambda: pyautogui.press('left'),
+            "RIGHT": lambda: pyautogui.press('right'),
+            "CIRCLE": lambda: pyautogui.hotkey('alt', 'tab'),
+            "SHAKE": lambda: pyautogui.press('esc')
+        }
+        for gesture in gestures:
+            self.gesture_handler.register_callback(gesture, actions[gesture])
 
     def setup_logging(self):
         """Setup logging configuration"""
@@ -197,21 +226,34 @@ class AirMouseGUI:
             self.logger.info("Switched to idle mode")
 
     def create_gesture_frame(self, parent):
-        """Create simplified gesture frame"""
+        """Create enhanced gesture frame"""
         frame = ttk.LabelFrame(parent, text="Gesture Control", padding=10)
 
-        # Gesture mode button
-        ttk.Button(
-            frame,
-            text="Gesture Mode",
-            command=self.set_gesture_mode
-        ).grid(row=0, column=0, padx=5, pady=5)
+        # Gesture visualization
+        self.gesture_icons = {
+            "UP": "↑",
+            "DOWN": "↓",
+            "LEFT": "←",
+            "RIGHT": "→",
+            "CIRCLE": "○",
+            "SHAKE": "✖"
+        }
 
-        # Recognized gesture display
-        self.recognized_gesture = tk.StringVar(value="No gesture detected")
-        ttk.Label(frame, text="Last Gesture:").grid(row=1, column=0, padx=5, pady=5)
-        ttk.Label(frame, textvariable=self.recognized_gesture,
-                font=('Arial', 14, 'bold')).grid(row=1, column=1, padx=5, pady=5)
+        self.gesture_display = ttk.Label(
+            frame,
+            text="○",  # Default circle icon
+            font=('Arial', 24),
+            width=5
+        )
+        self.gesture_display.grid(row=0, column=0, columnspan=2, pady=10)
+
+        # Status label
+        self.recognized_gesture = tk.StringVar(value="Perform a gesture")
+        ttk.Label(
+            frame,
+            textvariable=self.recognized_gesture,
+            font=('Arial', 10)
+        ).grid(row=1, column=0, columnspan=2)
 
         return frame
 
@@ -364,23 +406,33 @@ class AirMouseGUI:
         else:
             self.gesture_status.set("Failed to train model")
 
-    def handle_recognized_gesture(self, gesture):
-        """Handle recognized gestures"""
+    def handle_gesture(self, gesture):
+        """Handle all recognized gestures"""
         self.recognized_gesture.set(gesture)
+        self.logger.info(f"Gesture detected: {gesture}")
 
-        # Map to specific actions
-        if gesture == "UP":
+        # Map gestures to actions
+        actions = {
+            "UP": lambda: pyautogui.press('volumeup'),
+            "DOWN": lambda: pyautogui.press('volumedown'),
+            "LEFT": lambda: pyautogui.press('prevtrack'),
+            "RIGHT": lambda: pyautogui.press('nexttrack'),
+            "CIRCLE": self.switch_application,
+            "SHAKE": lambda: pyautogui.hotkey('ctrl', 'z')
+        }
+
+        if gesture in actions:
+            actions[gesture]()
+
+    def switch_application(self):
+        """Switch between applications (circle gesture)"""
+        try:
             import pyautogui
-            pyautogui.press('up')
-        elif gesture == "DOWN":
-            pyautogui.press('down')
-        elif gesture == "LEFT":
-            pyautogui.press('left')
-        elif gesture == "RIGHT":
-            pyautogui.press('right')
-        elif gesture == "SLIGHT_DOWN":
-            pyautogui.press('pagedown')
-
+            pyautogui.hotkey('alt', 'tab')
+            self.logger.info("Switched application")
+        except Exception as e:
+            self.logger.error(f"Error switching apps: {e}")
+    
     def update_calibration_progress(self, progress):
         """Update the calibration progress bar"""
         self.progress_var.set(progress)

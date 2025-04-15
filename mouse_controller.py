@@ -250,6 +250,10 @@ class MouseController:
                 pyautogui.press('left')
             elif gesture == "RIGHT":
                 pyautogui.press('right')
+            elif gesture == "CIRCLE":
+                pyautogui.hotkey('alt', 'tab')  # Switch applications
+            elif gesture == "SHAKE":
+                pyautogui.press('esc')  # Cancel/back action
 
             self.logger.info(f"Executed gesture: {gesture}")
 
@@ -262,6 +266,9 @@ class MouseController:
             # Apply sensitivity
             vx *= self.cursor_speed
             vy *= self.cursor_speed
+
+            if abs(vx) < 1.5: vx = 0
+            if abs(vy) < 1.5: vy = 0
 
             # Apply smoothing
             self.current_vx = self.current_vx * self.smoothing_factor + vx * (1 - self.smoothing_factor)
