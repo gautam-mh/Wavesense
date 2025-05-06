@@ -10,7 +10,7 @@ class MouseController:
 
         # Initialize all attributes
         self.cursor_speed = 5.0
-        self.smoothing_factor = 0.5
+        self.smoothing_factor = 0.9
         self.current_vx = 0.0
         self.current_vy = 0.0
         self.gesture_callback = None  # Initialize gesture_callback
@@ -144,7 +144,7 @@ class MouseController:
             return False
 
     def process_data(self, data):
-        """Process incoming data from ESP32"""
+        """Process incoming data from ESP32 with improved gesture handling"""
         try:
             print(f"Received: {data}")  # Debug print
 
@@ -158,25 +158,50 @@ class MouseController:
                     self.move_cursor(vx, vy)
                 return
 
-            # Handle gesture data
+            # Handle gesture data with cooldown and priority
             if data.startswith("GESTURE,"):
-                if self.gesture_callback:
-                    self.gesture_callback(data)
-                return
-
-            if data.startswith("GESTURE_DETECTED,"):
                 current_time = time.time()
                 gesture = data.split(',')[1].strip()
 
+                # Apply gesture-specific cooldowns
+                min_cooldown = 0.3  # Base cooldown (300ms)
 
+                # Longer cooldown for circles to prevent overlap
+                if gesture == "CIRCLE":
+                    min_cooldown = 0.8
+                # Shorter cooldown for directional gestures
+                elif gesture in ["LEFT", "RIGHT"]:
+                    min_cooldown = 0.2
+
+                # Check if we should process this gesture
                 if (not hasattr(self, 'last_gesture') or
-                    gesture != self.last_gesture or
-                    current_time - self.last_gesture_time > 0.5):  # 500ms cooldown
+                    current_time - self.last_gesture_time > min_cooldown or
+                    gesture != self.last_gesture):
 
                     self.last_gesture = gesture
                     self.last_gesture_time = current_time
-                    self.handle_gesture(gesture)
-        
+
+                    # Handle different gesture types
+                    if gesture == "CIRCLE":
+                        print("Pure circle gesture detected")
+                        pyautogui.press('right')  # Example: Next slide
+
+                    elif gesture in ["LEFT", "RIGHT"]:
+                        print(f"Tilt gesture: {gesture}")
+                        distance = 30  # pixels to move
+                        if gesture == "LEFT":
+                            pyautogui.move(-distance, 0)
+                        else:
+                            pyautogui.move(distance, 0)
+
+                    elif gesture == "SHAKE":
+                        print("Shake gesture detected")
+                        pyautogui.press('esc')  # Example: Exit mode
+
+                    # Call external callback if set
+                    if self.gesture_callback:
+                        self.gesture_callback(data)
+                return
             # Handle calibration progress
             if data.startswith("CALIBRATION_PROGRESS,"):
                 progress = int(data.split(',')[1])
@@ -241,11 +266,9 @@ class MouseController:
             import pyautogui
 
             if gesture == "UP":
-                pyautogui.press('up')
+                pyautogui.press('f5')
             elif gesture == "DOWN":
-                pyautogui.press('down')
-            elif gesture == "SLIGHT_DOWN":
-                pyautogui.press('pagedown')  # Or another action
+                pyautogui.press('esc')
             elif gesture == "LEFT":
                 pyautogui.press('left')
             elif gesture == "RIGHT":
@@ -267,12 +290,18 @@ class MouseController:
             vx *= self.cursor_speed
             vy *= self.cursor_speed
 
-            if abs(vx) < 1.5: vx = 0
-            if abs(vy) < 1.5: vy = 0
+            if abs(vx) < 10.0: vx = 0
+            if abs(vy) < 10.0: vy = 0
+            
 
             # Apply smoothing
             self.current_vx = self.current_vx * self.smoothing_factor + vx * (1 - self.smoothing_factor)
             self.current_vy = self.current_vy * self.smoothing_factor + vy * (1 - self.smoothing_factor)
+
+            if abs(self.current_vx) < 0.5:
+                self.current_vx = 0
+            if abs(self.current_vy) < 0.5:
+                self.current_vy = 0
 
             # Only move if above threshold
             if abs(self.current_vx) > 0.1 or abs(self.current_vy) > 0.1:
