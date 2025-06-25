@@ -55,18 +55,24 @@ Wavesense/
 ## ⚡ Quick Start
 
 1. **Clone the repo:**
+
    ```bash
-git clone https://github.com/yourusername/wavesense.git
-cd wavesense
-```
+   git clone https://github.com/yourusername/wavesense.git
+   cd wavesense
+   ```
+
 2. **Install Python dependencies:**
+
    ```bash
-pip install -r requirements.txt
-```
+   pip install -r requirements.txt
+   ```
+
 3. **Run the GUI:**
+
    ```bash
-python main.py
-```
+   python main.py
+   ```
+
 4. **Flash ESP32 firmware:**
    - Open `esp32_code/` in [PlatformIO](https://platformio.org/)
    - Build & upload to your ESP32
@@ -156,6 +162,7 @@ _Customize gestures in `config.py` and `gesture_handler.py`._
 ## 🤝 Contributing
 
 Contributions are welcome! To get started:
+
 1. Fork this repo
 2. Create a new branch (`git checkout -b feature/your-feature`)
 3. Commit your changes
@@ -182,13 +189,13 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 ## ❓ FAQ & Troubleshooting
 
 - **Q:** _ESP32 not connecting to PC?_
-  - A: Ensure both are on the same WiFi network. Check firewall settings.
+  - **A:** Ensure both are on the same WiFi network. Check firewall settings.
 - **Q:** _GUI not launching?_
-  - A: Check PyQt5 installation and Python version.
+  - **A:** Check PyQt5 installation and Python version.
 - **Q:** _Firmware upload fails?_
-  - A: Check USB cable, board selection, and PlatformIO drivers.
+  - **A:** Check USB cable, board selection, and PlatformIO drivers.
 - **Q:** _How to debug ESP32?_
-  - A: Use PlatformIO's Serial Monitor for real-time logs.
+  - **A:** Use PlatformIO's Serial Monitor for real-time logs.
 
 ---
 
