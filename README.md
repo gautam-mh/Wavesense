@@ -128,12 +128,6 @@ python main.py
 
 ---
 
-## 🖼️ Screenshots & Demo
-
-> _Add screenshots or GIFs of the GUI and device in action here!_
-
----
-
 ## 🧑‍💻 Configuration & Customization
 
 - All parameters (sampling rate, gesture mappings, etc.) are in `config.py`.
