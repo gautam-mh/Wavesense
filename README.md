@@ -10,15 +10,29 @@
 
 ---
 
+## 📑 Table of Contents
+
+- [✨ Features](#-features)
+- [🚀 Quick Start](#-quick-start)
+- [🛠️ Build & Run Instructions](#️-build--run-instructions)
+- [🧑‍💻 Configuration & Customization](#-configuration--customization)
+- [📚 Usage Guide](#-usage-guide)
+- [🤝 Contributing](#-contributing)
+- [📝 License](#-license)
+- [🙏 Credits](#-credits)
+- [❓ FAQ & Troubleshooting](#-faq--troubleshooting)
+
+---
+
 ## ✨ Features
 
-- 🖱️ Wireless air mouse (ESP32 + MPU6050 IMU)
-- 🤚 Real-time gesture recognition & mapping
-- 🖥️ PyQt5 GUI for configuration and live feedback
-- 🔄 Customizable gesture-to-action mapping
-- 🛠️ Sensor calibration tools
-- ⚡ Modular, extensible Python backend
-- 🔌 WiFi communication with ESP32
+- 🖱️ **Wireless air mouse** (ESP32 + MPU6050 IMU)
+- 🤚 **Real-time gesture recognition & mapping**
+- 🖥️ **PyQt5 GUI** for configuration and live feedback
+- 🔄 **Customizable gesture-to-action mapping**
+- 🛠️ **Sensor calibration tools**
+- ⚡ **Modular, extensible Python backend**
+- 🔌 **WiFi communication with ESP32**
 
 ---
 
@@ -52,41 +66,36 @@ Wavesense/
 
 ---
 
-## ⚡ Quick Start
+## 🚀 Quick Start
 
-1. **Clone the repo:**
+> **⚡ Get up and running in minutes!**
 
-   ```bash
-   git clone https://github.com/yourusername/wavesense.git
-   cd wavesense
-   ```
+```bash
+# 1. Clone the repo:
+git clone https://github.com/yourusername/wavesense.git
+cd wavesense
 
-2. **Install Python dependencies:**
+# 2. Install Python dependencies:
+pip install -r requirements.txt
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+# 3. Run the GUI:
+python main.py
 
-3. **Run the GUI:**
-
-   ```bash
-   python main.py
-   ```
-
-4. **Flash ESP32 firmware:**
-   - Open `esp32_code/` in [PlatformIO](https://platformio.org/)
-   - Build & upload to your ESP32
+# 4. Flash ESP32 firmware:
+#    - Open `esp32_code/` in PlatformIO
+#    - Build & upload to your ESP32
+```
 
 ---
 
 ## 🛠️ Build & Run Instructions
 
-### 1. Python Application (Desktop Side)
+### 💻 1. Python Application (Desktop Side)
 
 #### Prerequisites
-- Python 3.7+
-- pip (Python package manager)
-- Windows, macOS, or Linux
+- 🐍 Python 3.7+
+- 📦 pip (Python package manager)
+- 🖥️ Windows, macOS, or Linux
 
 #### Install All Dependencies
 
@@ -106,11 +115,14 @@ python main.py
 
 #### Troubleshooting
 - If you see missing package errors, ensure you are using the correct Python version and environment.
-- For GUI issues, check PyQt5 installation: `pip show PyQt5`.
+- For GUI issues, check PyQt5 installation:
+  ```bash
+  pip show PyQt5
+  ```
 
 ---
 
-### 2. ESP32 Firmware (Sensor Side)
+### 📡 2. ESP32 Firmware (Sensor Side)
 
 #### Prerequisites
 - [PlatformIO](https://platformio.org/) (VSCode extension recommended)
@@ -144,10 +156,10 @@ python main.py
 4. **Switch modes** (Cursor, Gesture, Idle) as needed.
 5. **Calibrate** using the GUI for best results.
 
-### Default Gestures
-- `UP`, `DOWN`, `LEFT`, `RIGHT`: Media/navigation
-- `CIRCLE`: Switch app
-- `SHAKE`: Undo/cancel
+### 🎯 Default Gestures
+- ⬆️ `UP`, ⬇️ `DOWN`, ⬅️ `LEFT`, ➡️ `RIGHT`: Media/navigation
+- 🔄 `CIRCLE`: Switch app
+- 🤯 `SHAKE`: Undo/cancel
 
 _Customize gestures in `config.py` and `gesture_handler.py`._
 
@@ -157,10 +169,10 @@ _Customize gestures in `config.py` and `gesture_handler.py`._
 
 Contributions are welcome! To get started:
 
-1. Fork this repo
-2. Create a new branch (`git checkout -b feature/your-feature`)
-3. Commit your changes
-4. Push and open a pull request
+1. 🍴 Fork this repo
+2. 🌱 Create a new branch (`git checkout -b feature/your-feature`)
+3. 💾 Commit your changes
+4. 🚀 Push and open a pull request
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for more.
 
@@ -182,14 +194,22 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 ## ❓ FAQ & Troubleshooting
 
-- **Q:** _ESP32 not connecting to PC?_
-  - **A:** Ensure both are on the same WiFi network. Check firewall settings.
-- **Q:** _GUI not launching?_
-  - **A:** Check PyQt5 installation and Python version.
-- **Q:** _Firmware upload fails?_
-  - **A:** Check USB cable, board selection, and PlatformIO drivers.
-- **Q:** _How to debug ESP32?_
-  - **A:** Use PlatformIO's Serial Monitor for real-time logs.
+<details>
+<summary><strong>💡 Click to expand FAQ</strong></summary>
+
+**Q:** _ESP32 not connecting to PC?_
+- **A:** Ensure both are on the same WiFi network. Check firewall settings.
+
+**Q:** _GUI not launching?_
+- **A:** Check PyQt5 installation and Python version.
+
+**Q:** _Firmware upload fails?_
+- **A:** Check USB cable, board selection, and PlatformIO drivers.
+
+**Q:** _How to debug ESP32?_
+- **A:** Use PlatformIO's Serial Monitor for real-time logs.
+
+</details>
 
 ---
 
