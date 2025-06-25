@@ -52,12 +52,12 @@ class AirMouseGUI(QWidget):
     def setup_gesture_callbacks(self):
         gestures = ["UP", "DOWN", "LEFT", "RIGHT", "CIRCLE", "SHAKE"]
         actions = {
-            "UP": lambda: pyautogui.press('volumeup'),
-            "DOWN": lambda: pyautogui.press('volumedown'),
+            "UP": lambda: pyautogui.press('f5'),
+            "DOWN": lambda: pyautogui.press('esc'),
             "LEFT": lambda: pyautogui.press('left'),
             "RIGHT": lambda: pyautogui.press('right'),
             "CIRCLE": lambda: pyautogui.hotkey('alt', 'tab'),
-            "SHAKE": lambda: pyautogui.press('esc')
+            "SHAKE": lambda: pyautogui.press('')
         }
         for gesture in gestures:
             self.gesture_handler.register_callback(gesture, actions[gesture])
@@ -241,12 +241,12 @@ class AirMouseGUI(QWidget):
         self.gesture_icon_label.setText(icons.get(gesture, "○"))
 
         actions = {
-            "UP": lambda: pyautogui.press('volumeup'),
-            "DOWN": lambda: pyautogui.press('volumedown'),
-            "LEFT": lambda: pyautogui.press('prevtrack'),
-            "RIGHT": lambda: pyautogui.press('nexttrack'),
+            "UP": lambda: pyautogui.press('f5'),
+            "DOWN": lambda: pyautogui.press('esc'),
+            "LEFT": lambda: pyautogui.press('left'),
+            "RIGHT": lambda: pyautogui.press('right'),
             "CIRCLE": self.switch_application,
-            "SHAKE": lambda: pyautogui.hotkey('ctrl', 'z')
+            "SHAKE": lambda: pyautogui.hotkey('esc')
         }
         if gesture in actions:
             actions[gesture]()
